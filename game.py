@@ -22,7 +22,7 @@ FLOOR_Y = 650
 # Bird settings
 BIRD_START_X = 100
 BIRD_START_Y = 384
-BIRD_FLAP_RATE = 150
+BIRD_FLAP_RATE = 10
 MAX_BIRD_ROTATION = 30
 MIN_BIRD_ROTATION = -90
 ROTATION_SPEED = 5
@@ -173,6 +173,7 @@ class FlappyBirdGame:
         self.bird_rect = self.bird.get_rect(center=(BIRD_START_X, BIRD_START_Y))
         self.bird_movement = 0
         self.bird_rotation = 0
+        self.bird_flap_timer = 0
         self.pipe_list = []
         self.score = 0
         self.passed_pipes = set()
@@ -275,10 +276,21 @@ class FlappyBirdGame:
         return True
         
     def rotate_bird(self):
-        self.bird_rotation += MIN_BIRD_ROTATION - self.bird_rotation
-        if self.bird_movement > 0:
+        # Target rotation based on movement
+        if self.bird_movement < 0:
+            target_rotation = MAX_BIRD_ROTATION
+        else:
+            target_rotation = MIN_BIRD_ROTATION
+        
+        # Smoothly interpolate towards target
+        if self.bird_rotation < target_rotation:
             self.bird_rotation += ROTATION_SPEED
-        self.bird_rotation = max(MIN_BIRD_ROTATION, min(MAX_BIRD_ROTATION, self.bird_rotation))
+            if self.bird_rotation > target_rotation:
+                self.bird_rotation = target_rotation
+        elif self.bird_rotation > target_rotation:
+            self.bird_rotation -= ROTATION_SPEED
+            if self.bird_rotation < target_rotation:
+                self.bird_rotation = target_rotation
         
         rotated_bird = pygame.transform.rotozoom(self.bird, self.bird_rotation, 1)
         rotated_rect = rotated_bird.get_rect(center=self.bird_rect.center)
@@ -291,9 +303,10 @@ class FlappyBirdGame:
         
     def check_score(self):
         for pipe in self.pipe_list:
-            if pipe.centerx < self.bird_rect.centerx and pipe not in self.passed_pipes:
+            pipe_id = id(pipe)
+            if pipe.centerx < self.bird_rect.centerx and pipe_id not in self.passed_pipes:
                 self.score += 1
-                self.passed_pipes.add(pipe)
+                self.passed_pipes.add(pipe_id)
                 if self.sound_enabled:
                     self.score_sound.play()
                 self.flash_count = FLASH_DURATION
@@ -332,17 +345,38 @@ class FlappyBirdGame:
             high_score_rect = high_score_surface.get_rect(center=(SCREEN_WIDTH//2, 50))
             self.screen.blit(high_score_surface, high_score_rect)
             
-        start_text = self.game_font.render('Press SPACE or Click to Start', True, (255, 255, 255))
-        start_rect = start_text.get_rect(center=(SCREEN_WIDTH//2, 550))
+        # Create semi-transparent background for text
+        text_bg = pygame.Surface((SCREEN_WIDTH - 40, 160), pygame.SRCALPHA)
+        text_bg.fill((0, 0, 0, 150))
+        text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH//2, 480))
+        self.screen.blit(text_bg, text_bg_rect)
         
-        start_shadow = self.game_font.render('Press SPACE or Click to Start', True, (0, 0, 0))
-        start_shadow_rect = start_shadow.get_rect(center=(SCREEN_WIDTH//2 + 2, 552))
+        # Split text into two lines
+        start_line1 = self.game_font.render('Press SPACE', True, (255, 255, 255))
+        start_line1_rect = start_line1.get_rect(center=(SCREEN_WIDTH//2, 440))
         
-        self.screen.blit(start_shadow, start_shadow_rect)
-        self.screen.blit(start_text, start_rect)
+        for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+            start_line1_outline = self.game_font.render('Press SPACE', True, (0, 0, 0))
+            start_line1_outline_rect = start_line1_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 440 + offset_y))
+            self.screen.blit(start_line1_outline, start_line1_outline_rect)
+        self.screen.blit(start_line1, start_line1_rect)
         
-        controls_text = self.small_font.render('SPACE: Jump | P: Pause | M: Toggle Sound', True, (200, 200, 200))
-        controls_rect = controls_text.get_rect(center=(SCREEN_WIDTH//2, 600))
+        start_line2 = self.game_font.render('or Click to Start', True, (255, 255, 255))
+        start_line2_rect = start_line2.get_rect(center=(SCREEN_WIDTH//2, 475))
+        
+        for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+            start_line2_outline = self.game_font.render('or Click to Start', True, (0, 0, 0))
+            start_line2_outline_rect = start_line2_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 475 + offset_y))
+            self.screen.blit(start_line2_outline, start_line2_outline_rect)
+        self.screen.blit(start_line2, start_line2_rect)
+        
+        controls_text = self.small_font.render('SPACE: Jump | P: Pause | M: Toggle Sound', True, (255, 255, 200))
+        controls_rect = controls_text.get_rect(center=(SCREEN_WIDTH//2, 520))
+        
+        for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+            controls_outline = self.small_font.render('SPACE: Jump | P: Pause | M: Toggle Sound', True, (0, 0, 0))
+            controls_outline_rect = controls_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 520 + offset_y))
+            self.screen.blit(controls_outline, controls_outline_rect)
         self.screen.blit(controls_text, controls_rect)
         
     def pause_display(self):
@@ -475,27 +509,59 @@ class FlappyBirdGame:
                     self.screen.blit(self.game_over_surface, self.game_over_rect)
                     self.score_display('game_over')
                     
-                    restart_text = self.game_font.render('Press SPACE or Click to Restart', True, (255, 255, 255))
-                    restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, 550))
+                    # Create semi-transparent background for text
+                    text_bg = pygame.Surface((SCREEN_WIDTH - 40, 100), pygame.SRCALPHA)
+                    text_bg.fill((0, 0, 0, 150))
+                    text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH//2, 520))
+                    self.screen.blit(text_bg, text_bg_rect)
                     
-                    restart_shadow = self.game_font.render('Press SPACE or Click to Restart', True, (0, 0, 0))
-                    restart_shadow_rect = restart_shadow.get_rect(center=(SCREEN_WIDTH//2 + 2, 552))
+                    # Split text into two lines
+                    restart_line1 = self.game_font.render('Press SPACE', True, (255, 255, 255))
+                    restart_line1_rect = restart_line1.get_rect(center=(SCREEN_WIDTH//2, 500))
                     
-                    self.screen.blit(restart_shadow, restart_shadow_rect)
-                    self.screen.blit(restart_text, restart_rect)
+                    for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                        restart_line1_outline = self.game_font.render('Press SPACE', True, (0, 0, 0))
+                        restart_line1_outline_rect = restart_line1_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 500 + offset_y))
+                        self.screen.blit(restart_line1_outline, restart_line1_outline_rect)
+                    self.screen.blit(restart_line1, restart_line1_rect)
+                    
+                    restart_line2 = self.game_font.render('or Click to Restart', True, (255, 255, 255))
+                    restart_line2_rect = restart_line2.get_rect(center=(SCREEN_WIDTH//2, 535))
+                    
+                    for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                        restart_line2_outline = self.game_font.render('or Click to Restart', True, (0, 0, 0))
+                        restart_line2_outline_rect = restart_line2_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 535 + offset_y))
+                        self.screen.blit(restart_line2_outline, restart_line2_outline_rect)
+                    self.screen.blit(restart_line2, restart_line2_rect)
                     
             elif self.game_state == 'game_over':
                 self.screen.blit(self.game_over_surface, self.game_over_rect)
                 self.score_display('game_over')
                 
-                restart_text = self.game_font.render('Press SPACE or Click to Restart', True, (255, 255, 255))
-                restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, 550))
+                # Create semi-transparent background for text
+                text_bg = pygame.Surface((SCREEN_WIDTH - 40, 100), pygame.SRCALPHA)
+                text_bg.fill((0, 0, 0, 150))
+                text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH//2, 520))
+                self.screen.blit(text_bg, text_bg_rect)
                 
-                restart_shadow = self.game_font.render('Press SPACE or Click to Restart', True, (0, 0, 0))
-                restart_shadow_rect = restart_shadow.get_rect(center=(SCREEN_WIDTH//2 + 2, 552))
+                # Split text into two lines
+                restart_line1 = self.game_font.render('Press SPACE', True, (255, 255, 255))
+                restart_line1_rect = restart_line1.get_rect(center=(SCREEN_WIDTH//2, 500))
                 
-                self.screen.blit(restart_shadow, restart_shadow_rect)
-                self.screen.blit(restart_text, restart_rect)
+                for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                    restart_line1_outline = self.game_font.render('Press SPACE', True, (0, 0, 0))
+                    restart_line1_outline_rect = restart_line1_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 500 + offset_y))
+                    self.screen.blit(restart_line1_outline, restart_line1_outline_rect)
+                self.screen.blit(restart_line1, restart_line1_rect)
+                
+                restart_line2 = self.game_font.render('or Click to Restart', True, (255, 255, 255))
+                restart_line2_rect = restart_line2.get_rect(center=(SCREEN_WIDTH//2, 535))
+                
+                for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                    restart_line2_outline = self.game_font.render('or Click to Restart', True, (0, 0, 0))
+                    restart_line2_outline_rect = restart_line2_outline.get_rect(center=(SCREEN_WIDTH//2 + offset_x, 535 + offset_y))
+                    self.screen.blit(restart_line2_outline, restart_line2_outline_rect)
+                self.screen.blit(restart_line2, restart_line2_rect)
                 
             self.floor_x_pos -= FLOOR_SPEED
             self.draw_floor()
